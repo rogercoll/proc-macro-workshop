@@ -1,23 +1,10 @@
-use derive_builder::Builder;
+use derive_debug::CustomDebug;
 
-#[derive(Builder)]
-pub struct Command {
-    executable: String,
-    #[builder(each = "arg")]
-    args: Vec<String>,
-    #[builder(each = "env")]
-    env: Vec<String>,
-    current_dir: Option<String>,
+#[derive(CustomDebug)]
+pub struct Field<T> {
+    value: T,
+    #[debug = "0b{:08b}"]
+    bitmask: u8,
 }
 
-fn main() {
-    let command = Command::builder()
-        .executable("cargo".to_owned())
-        .arg("build".to_owned())
-        .arg("--release".to_owned())
-        .build()
-        .unwrap();
-
-    assert_eq!(command.executable, "cargo");
-    assert_eq!(command.args, vec!["build", "--release"]);
-}
+fn main() {}

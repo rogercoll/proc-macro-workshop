@@ -28,33 +28,48 @@ fn ty_inner_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> 
     #[builder(each = "arg")]
     Extracts arg value from builder attribute
 */
-fn builder_of(field: &syn::Field) -> Option<Ident> {
-    // return Some("arg".into());
+fn builder_of(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    let name = &field.ident;
+    let ty = &field.ty;
     for attr in &field.attrs {
-        if attr.path().is_ident("builder") {
-            let precondition: Expr = attr.parse_args().unwrap();
-            if let Expr::Assign(assing) = precondition {
-                if let Expr::Path(left) = *assing.left {
-                    // assert valid attribute
-
-                    assert!(
-                        left.path.segments.len() == 1
-                            && left.path.segments[0].ident.to_string() == "each"
+        assert!(attr.path().is_ident("builder"));
+        let precondition: Expr = attr.parse_args().unwrap();
+        if let Expr::Assign(assing) = precondition {
+            if let Expr::Path(left) = *assing.left {
+                // assert valid attribute
+                if left.path.segments.len() != 1
+                    || left.path.segments[0].ident.to_string() != "each"
+                {
+                    return Some(
+                        syn::Error::new_spanned(&attr.meta, "expected `builder(each = \"...\")`")
+                            .to_compile_error(),
                     );
-                } else {
-                    return None;
                 }
-                if let Expr::Lit(fn_name) = *assing.right {
-                    if let Lit::Str(parsed_fn_name) = fn_name.lit {
-                        return Some(Ident::new(&parsed_fn_name.value(), parsed_fn_name.span()));
+            }
+            if let Expr::Lit(fn_name) = *assing.right {
+                if let Lit::Str(ref parsed_fn_name) = fn_name.lit {
+                    let inner_ty = ty_inner_type("Vec", &ty).unwrap();
+                    let fn_ident = Ident::new(&parsed_fn_name.value(), parsed_fn_name.span());
+                    if parsed_fn_name.value() == name.clone().unwrap().to_string() {
+                        return Some(quote! {
+                            fn #fn_ident(&mut self, #name: #inner_ty) -> &mut Self {
+                                self.#name.push(#name);
+                                self
+                            }
+                        });
                     } else {
-                        return None;
+                        return Some(quote! {
+                            fn #fn_ident(&mut self, #name: #inner_ty) -> &mut Self {
+                                self.#name.push(#name);
+                                self
+                            }
+                            fn #name(&mut self, #name: #ty) -> &mut Self {
+                                self.#name = #name;
+                                self
+                            }
+                        });
                     }
-                } else {
-                    return None;
                 }
-            } else {
-                return None;
             }
         }
     }
@@ -109,27 +124,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             }
         } else if with_builder_attr.is_some() {
-            let inner_ty = ty_inner_type("Vec", &ty).unwrap();
-            let fn_name = with_builder_attr.unwrap();
-            if fn_name == name.clone().unwrap().to_string() {
-                quote! {
-                    fn #fn_name(&mut self, #name: #inner_ty) -> &mut Self {
-                        self.#name.push(#name);
-                        self
-                    }
-                }
-            } else {
-                quote! {
-                    fn #fn_name(&mut self, #name: #inner_ty) -> &mut Self {
-                        self.#name.push(#name);
-                        self
-                    }
-                    fn #name(&mut self, #name: #ty) -> &mut Self {
-                        self.#name = #name;
-                        self
-                    }
-                }
-            }
+            with_builder_attr.unwrap()
         } else {
             quote! {
                 fn #name(&mut self, #name: #ty) -> &mut Self {
@@ -168,7 +163,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
         impl #bident {
             #(#methods)*
-            pub fn build(&self) -> Result<#name, Box<dyn std::error::Error>> {
+            pub fn build(&self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
                 Ok(#name {
                         #(#build_fields,)*
                     }
